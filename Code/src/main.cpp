@@ -20,6 +20,13 @@ IBusBM Ibus;
 #define STEERING_DEADZONE    10    // ± from center considered "neutral"
 #define MAXZONE              15    // ± from max val to go full power
 
+const uint16_t CENTER_THRESHOLD = MID_VAL * CENTER_THRESHOLD_PCT / 100;
+const uint16_t STROKE_THRESHOLD = MID_VAL * STROKE_THRESHOLD_PCT / 100;
+
+enum Stroke { NONE, UP, DOWN, LEFT, RIGHT };
+const Stroke CALIBRATION_SEQUENCE[HISTORY_SIZE] = { UP, DOWN, DOWN, LEFT, DOWN, LEFT, RIGHT}; // Konami-like code
+const Stroke TANK_SEQUENCE[HISTORY_SIZE] = { DOWN, RIGHT, DOWN, RIGHT, LEFT, DOWN, LEFT}; // Konami-like code
+
 
 //default values to be used
 const uint16_t MID_VAL = 1500;
@@ -43,8 +50,8 @@ struct Calibration {
   uint16_t min1, max1, mid1;
   uint16_t min2, max2, mid2;
 } calibration = { 
-  LOW_VALUE, HIGH_VALUE, CENTER_VALUE,
-  LOW_VALUE, HIGH_VALUE, CENTER_VALUE 
+  LOW_VAL, HIGH_VAL, MID_VAL,
+  LOW_VAL, HIGH_VAL, MID_VAL 
 };
 
 Stroke strokeHistory[HISTORY_SIZE];
@@ -53,13 +60,12 @@ uint32_t lastStrokeTime = 0;
 bool calibrating = false;
 uint32_t calibrationStart = 0;
 
-4
 Stroke detectStroke() {
   static uint16_t lastMid1 = calibration.mid1;
   static uint16_t lastMid2 = calibration.mid2;
   
-  const int16_t diff1 = ppm1_value - lastMid1;
-  const int16_t diff2 = ppm2_value - lastMid2;
+  const int16_t diff1 = ppm1 - lastMid1;
+  const int16_t diff2 = ppm2 - lastMid2;
 
   if ( ((uint16_t) abs(diff1)) < CENTER_THRESHOLD && ((uint16_t) abs(diff2)) < CENTER_THRESHOLD) return NONE;
   
@@ -96,18 +102,17 @@ bool checkTankSequence() {
 }
 
 void startCalibration() {
-  calibration.min1 = calibration.max1 = ppm1_value;
-  calibration.min2 = calibration.max2 = ppm2_value;
+  calibration.min1 = calibration.max1 = ppm1;
+  calibration.min2 = calibration.max2 = ppm2;
   calibrationStart = millis();
   calibrating = true;
-  digitalWrite(LED_PIN, HIGH);
 }
 
 void updateCalibration() {
-  calibration.min1 = min(calibration.min1, ppm1_value);
-  calibration.max1 = max(calibration.max1, ppm1_value);
-  calibration.min2 = min(calibration.min2, ppm2_value);
-  calibration.max2 = max(calibration.max2, ppm2_value);
+  calibration.min1 = min(calibration.min1, ppm1);
+  calibration.max1 = max(calibration.max1, ppm1);
+  calibration.min2 = min(calibration.min2, ppm2);
+  calibration.max2 = max(calibration.max2, ppm2);
 }
 
 void finalizeCalibration() {
@@ -124,7 +129,6 @@ void finalizeCalibration() {
   Serial.println(calibration.max2);
 
   uint32_t start = millis();
-  digitalWrite(LED_PIN, HIGH);
   
   // Initialize Boyer-Moore variables for both channels
   uint16_t major1 = calibration.mid1, major2 = calibration.mid2;
@@ -132,23 +136,23 @@ void finalizeCalibration() {
   
   while (millis() - start < 2000) {
       // Update channel 1
-      if (ppm1_value == major1) {
+      if (ppm1 == major1) {
           count1++;
       } else {
           count1--;
           if (count1 == 0) {
-              major1 = ppm1_value;
+              major1 = ppm1;
               count1 = 1;
           }
       }
   
       // Update channel 2
-      if (ppm2_value == major2) {
+      if (ppm2 == major2) {
           count2++;
       } else {
           count2--;
           if (count2 == 0) {
-              major2 = ppm2_value;
+              major2 = ppm2;
               count2 = 1;
           }
       }
@@ -160,9 +164,7 @@ void finalizeCalibration() {
   // if your data might not have a true majority
   
   calibration.mid1 = major1;
-  calibration.mid2 = major2;
-  digitalWrite(LED_PIN, LOW);
-  
+  calibration.mid2 = major2;  
 }
 
 
@@ -170,8 +172,8 @@ void finalizeCalibration() {
 
 
 //Controls speed of the robot
-void speedControl(ppm) {
-  if ppm < MID_VAL {
+int speedControl(uint16_t ppm) {
+  if (ppm < MID_VAL) {
   return map(ppm, MID_VAL, LOW_VAL, 0, 255);
   }
   else {
@@ -179,7 +181,7 @@ void speedControl(ppm) {
   }
 }
 
-void motorControl(uint8_t pin, int speed, ppm) {
+void motorControl(uint8_t pin, int speed, uint16_t ppm) {
   speed = speedControl(ppm);
   speed = constrain(speed, 0, 255);
   analogWrite(pin, speed);
